@@ -1,4 +1,5 @@
 use clap::Parser;
+use std::sync::{Arc,Mutex};
 
 mod discord;
 mod irc_side;
@@ -53,9 +54,12 @@ async fn main() {
     let sender = client.sender();
     let stream = client.stream().expect("Cannot get stream");
 
+    let clientref = Arc::new(Mutex::new(client));
+
     let handler = discord::Handler {
         config: config.clone(),
         irc_sender: sender, 
+        client_ref: clientref.clone(),
     };
 
     println!("LOG: Created discord handler");

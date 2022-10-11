@@ -1,22 +1,50 @@
 use serenity::async_trait;
+use serenity::model::user::User;
+use serenity::model::prelude::GuildId;
+use std::sync::Arc;
 use serenity::prelude::*;
+use std::sync::Mutex;
 use serenity::model::channel::Message;
 use serenity::framework::standard::macros::{command, group};
 use serenity::framework::standard::{StandardFramework, CommandResult};
 
 pub struct Handler {
     pub config: crate::Config,
-    pub irc_sender: irc::client::Sender
+    pub irc_sender: irc::client::Sender,
+    pub client_ref: Arc<Mutex<irc::client::Client>>,
 }
 
 #[async_trait]
 impl EventHandler for Handler {
     async fn message(&self, ctx: Context, message: Message) {
-        if str::parse::<u64>(&self.config.discord_channels[0]).unwrap() == message.channel_id.0 {
-            print!("discord message get: {}", message.content);
-            self.irc_sender.send_privmsg(self.config.irc_channels[0].clone(), message.content).expect("Cannot send message");
+        match self.config.discord_channels
+            .iter()
+            .position(|id| {str::parse::<u64>(id).expect("Channel id was not a number") == message.channel_id.0}) {
+            Some(index) => {
+                let message = make_irc_message(message, &ctx).await;
+                self.irc_sender
+                    .send_privmsg(self.config.irc_channels[index].clone(), message)
+                    .expect("Cannot send message to irc");
+            }
+            None => {
+            }
         }
     }
+}
+
+async fn get_nick_from_user(user: &User, id: GuildId, ctx: &Context) -> String {
+    match user.nick_in(ctx.http.clone(), id).await {
+        Some(nick) => nick,
+        None => user.name.clone(),
+    }
+}
+async fn make_irc_message(message: Message, ctx: &Context) -> String {
+    let nick = get_nick_from_user(
+        &message.author, 
+        message.guild_id.expect("Message must be sent in a channel"),
+        &ctx).await;
+
+    format!("<{}> {}", nick, message.content)
 }
 
 pub async fn run_discord(handler: Handler) {
