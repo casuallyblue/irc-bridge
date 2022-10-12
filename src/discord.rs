@@ -5,8 +5,6 @@ use std::sync::Arc;
 use serenity::prelude::*;
 use std::sync::Mutex;
 use serenity::model::channel::Message;
-use serenity::framework::standard::macros::{command, group};
-use serenity::framework::standard::{StandardFramework, CommandResult};
 
 pub struct Handler {
     pub config: crate::Config,
@@ -47,21 +45,10 @@ async fn make_irc_message(message: Message, ctx: &Context) -> String {
     format!("<{}> {}", nick, message.content)
 }
 
-pub async fn run_discord(handler: Handler) {
-    let framework = StandardFramework::new()
-        .configure(|c| c.prefix("~")); // set the bot's prefix to "~"
-
-    // Login with a bot token from the environment
-    let token = handler.config.discord_token.clone();
-    let intents = GatewayIntents::non_privileged() | GatewayIntents::MESSAGE_CONTENT;
-    let mut client = Client::builder(token, intents)
-        .event_handler(handler)
-        .framework(framework)
-        .await
-        .expect("Error creating client");
-
+pub async fn run_discord(mut discordclient: Client) {
+    
     // start listening for events by starting a single shard
-    if let Err(why) = client.start().await {
+    if let Err(why) = discordclient.start().await {
         println!("An error occurred while running the client: {:?}", why);
     }
 }

@@ -1,5 +1,6 @@
 use clap::Parser;
 use std::sync::{Arc,Mutex};
+use serenity::{framework::StandardFramework, prelude::*};
 
 mod discord;
 mod irc_side;
@@ -64,8 +65,23 @@ async fn main() {
 
     println!("LOG: Created discord handler");
 
+    let framework = StandardFramework::new()
+        .configure(|c| c.prefix("~")); // set the bot's prefix to "~"
+
+    // Login with a bot token from the environment
+    let token = handler.config.discord_token.clone();
+    let intents = GatewayIntents::non_privileged() | GatewayIntents::MESSAGE_CONTENT;
+    let discord_client = Client::builder(token, intents)
+        .event_handler(handler)
+        .framework(framework)
+        .await
+        .expect("Error creating client");
+
+    let httpcache = discord_client.cache_and_http.clone();
+
+
     tokio::select!(
-        _ = discord::run_discord(handler) => {}
-        _ = irc_side::run_irc(stream, config.clone()) => {}
+        _ = discord::run_discord(discord_client) => {}
+        _ = irc_side::run_irc(stream, clientref.clone(), httpcache, config.clone()) => {}
     );
 }
