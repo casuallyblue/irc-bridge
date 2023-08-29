@@ -1,8 +1,10 @@
 #![feature(let_chains)]
 use clap::Parser;
 use serenity::{
-    framework::StandardFramework, http::Http,
-    model::prelude::application_command::ApplicationCommand, prelude::*,
+    framework::StandardFramework,
+    http::Http,
+    model::{prelude::application_command::ApplicationCommand, webhook::Webhook},
+    prelude::*,
 };
 use std::sync::{Arc, Mutex};
 
@@ -74,11 +76,18 @@ async fn main() {
 
     let clientref = Arc::new(Mutex::new(client));
 
+    let http = Http::new_with_application_id(&config.discord_token, config.application_id);
+
+    let webhook = Webhook::from_url(&http, &config.discord_webhook)
+        .await
+        .unwrap();
+
     let handler = discord::Handler {
         config: config.clone(),
         irc_sender: sender,
         client_ref: clientref.clone(),
         ignored_users: vec![1021460721239867535.into()],
+        webhook_id: webhook.id,
     };
 
     println!("LOG: Created discord handler");

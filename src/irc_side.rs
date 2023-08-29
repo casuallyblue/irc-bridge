@@ -31,6 +31,8 @@ pub async fn run_irc(
             continue;
         }
 
+        let mut username = "".into();
+
         if let irc::client::prelude::Command::PRIVMSG(channel, message) = message.command.clone() {
             if channel == "#openutd" {
                 if let Ok(members) = guild.search_members(&http, nick, None).await && members.len() > 0 {
@@ -44,13 +46,19 @@ pub async fn run_irc(
                     } else {
                         webhook.delete_avatar(&http).await.unwrap();
                     }
+                    username = c.user.name.clone();
 
                 } else {
                     webhook.delete_avatar(&http).await.unwrap();
+                    username = nick.into();
+                }
+
+                if username.contains("discord") {
+                    continue;
                 }
 
                 webhook
-                    .execute(&http, false, |w| w.content(message))
+                    .execute(&http, false, |w| w.content(message).username(username))
                     .await
                     .unwrap();
             }

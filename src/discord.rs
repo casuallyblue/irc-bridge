@@ -3,6 +3,7 @@ use serenity::model::channel::Message;
 use serenity::model::prelude::interaction::Interaction;
 use serenity::model::prelude::GuildId;
 use serenity::model::prelude::UserId;
+use serenity::model::prelude::WebhookId;
 use serenity::model::user::User;
 use serenity::prelude::*;
 use std::sync::Arc;
@@ -13,17 +14,23 @@ pub struct Handler {
     pub irc_sender: irc::client::Sender,
     pub client_ref: Arc<Mutex<irc::client::Client>>,
     pub ignored_users: Vec<UserId>,
+    pub webhook_id: WebhookId,
 }
 
 #[async_trait]
 impl EventHandler for Handler {
     async fn message(&self, ctx: Context, message: Message) {
-        if !message.is_own(&ctx.cache) && !self.ignored_users.contains(&message.author.id) {
+        if !message.is_own(&ctx.cache)
+            && !self.ignored_users.contains(&message.author.id)
+            && !(message.webhook_id == Some(self.webhook_id))
+        {
+            println!("{:?} {:?}", message.author, message.webhook_id);
             match self.config.discord_channels.iter().position(|id| {
                 str::parse::<u64>(id).expect("Channel id was not a number") == message.channel_id.0
             }) {
                 Some(index) => {
                     let message = make_irc_message(message, &ctx).await;
+
                     self.irc_sender
                         .send_privmsg(self.config.irc_channels[index].clone(), message)
                         .expect("Cannot send message to irc");

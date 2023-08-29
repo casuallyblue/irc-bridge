@@ -29,5 +29,9 @@
             rust-analyzer
         ] ++ (if system == "aarch64-darwin" then [ libiconv darwin.apple_sdk.frameworks.Security ] else [ ]);
       };
+
+      nixosModules = {
+          default = import ./irc-bridge.nix self;
+      };
     });
 }
