@@ -8,7 +8,7 @@ let cfg = config.casuallyblue.services.irc-bridge; in {
       bridge-env-file = mkOption {
         type = types.str;
         description = "The age file to load env vars from";
-      }
+      };
     };
   };
 
