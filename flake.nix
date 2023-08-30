@@ -20,13 +20,27 @@
 	pkgs = import nixpkgs {
           inherit system;
         };
+
+      sqlx-db = pkgs.runCommand "sqlx-db-prepare" {
+        nativeBuildInputs = with pkgs; [ sqlx-cli ];
+      } '' 
+        mkdir $out
+        export DATABASE_URL=sqlite:$out/bridge.sqlite3
+        sqlx database create
+        sqlx migrate --source ${./migrations} run
+      '';
       in
     {
+
       packages.default = craneLib.buildPackage {
         src = craneLib.cleanCargoSource ./.;
 
+
+      DATABASE_URL="sqlite://${sqlx-db}/bridge.sqlite3";
 	nativeBuildInputs = with pkgs; [
             rust-analyzer
+            pkg-config
+            openssl
         ] ++ (if system == "aarch64-darwin" then [ libiconv darwin.apple_sdk.frameworks.Security ] else [ ]);
       };
 

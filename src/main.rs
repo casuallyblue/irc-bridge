@@ -6,6 +6,7 @@ use serenity::{
     model::{prelude::application_command::ApplicationCommand, webhook::Webhook},
     prelude::*,
 };
+use sqlx::SqlitePool;
 use std::sync::{Arc, Mutex};
 
 mod discord;
@@ -23,8 +24,8 @@ pub struct Config {
     #[clap(env = "BRIDGE_IRC_PORT")]
     irc_port: String,
 
-    #[clap(env = "BRIDGE_IRC_CHANNELS")]
-    irc_channels: Vec<String>,
+    #[clap(env = "BRIDGE_IRC_CHANNEL")]
+    irc_channel: String,
 
     #[clap(env = "BRIDGE_DISCORD_TOKEN")]
     discord_token: String,
@@ -35,8 +36,11 @@ pub struct Config {
     #[clap(env = "BRIDGE_DISCORD_WEBHOOK")]
     discord_webhook: String,
 
-    #[clap(env = "BRIDGE_DISCORD_CHANNELS")]
-    discord_channels: Vec<String>,
+    #[clap(env = "BRIDGE_DISCORD_CHANNEL")]
+    discord_channel: String,
+
+    #[clap(env = "BRIDGE_SQLITE_PATH")]
+    sqlite_path: String,
 
     #[clap(env = "IRC_IGNORED_USERS")]
     ignored_irc_users: Vec<String>,
@@ -49,8 +53,6 @@ pub struct Config {
 async fn main() {
     let config = Config::parse();
 
-    println!("LOG: config: {:?}", config);
-
     println!("LOG: READ CONFIG");
 
     let irc_config = irc::client::prelude::Config {
@@ -59,7 +61,7 @@ async fn main() {
         port: Some(
             str::parse(&config.irc_port.clone()).expect("Must be an integer between 0 and 65536"),
         ),
-        channels: config.irc_channels.clone(),
+        channels: vec![config.irc_channel.clone()],
         use_tls: Some(true),
         ..Default::default()
     };
@@ -68,6 +70,8 @@ async fn main() {
         .await
         .expect("Cannot connect to irc");
     client.identify().unwrap();
+
+    let pool = SqlitePool::connect(&config.sqlite_path).await.unwrap();
 
     println!("LOG: Connected to irc");
 
@@ -88,6 +92,7 @@ async fn main() {
         client_ref: clientref.clone(),
         ignored_users: vec![1021460721239867535.into()],
         webhook_id: webhook.id,
+        database_pool: pool.clone(),
     };
 
     println!("LOG: Created discord handler");
@@ -109,7 +114,7 @@ async fn main() {
 
     tokio::select!(
         _ = discord::run_discord(discord_client) => {}
-        _ = irc_side::run_irc(stream, clientref.clone(), httpcache, config.clone()) => {}
+        _ = irc_side::run_irc(stream, clientref.clone(), httpcache, pool.clone(), config.clone()) => {}
     );
 }
 
