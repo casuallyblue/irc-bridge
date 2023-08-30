@@ -29,7 +29,7 @@ let cfg = config.casuallyblue.services.irc-bridge; in {
         bridge = self.packages.x86_64-linux.default;
       in ''
         source ${cfg.bridge-env-file}
-        export BRIDGE_SQLITE_PATH=sqlite3://bridge.sqlite3
+        export BRIDGE_SQLITE_PATH=sqlite:///var/lib/irc-bridge/bridge.sqlite3
         exec ${bridge}/bin/irc-bridge
       '';
     };
