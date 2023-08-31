@@ -48,6 +48,41 @@ impl EventHandler for Handler {
             Interaction::ApplicationCommand(command) => match command.data.name.as_str() {
                 "connect_user" => {
                     let nick = command.data.options.first().unwrap().clone().value.unwrap();
+                    let nick = nick.as_str().unwrap();
+
+                    let nick_c = nick.clone();
+                    if let Ok(_) = sqlx::query!("SELECT * FROM users WHERE ircnick=?1", nick_c)
+                        .fetch_one(&self.database_pool)
+                        .await
+                    {
+                        let user_id_str = command.user.id.0.to_string();
+                        sqlx::query!(
+                            "UPDATE users SET discordid = ?1, discordnick = ?2 WHERE ircnick = ?3",
+                            user_id_str,
+                            command.user.name,
+                            nick_c
+                        )
+                        .execute(&self.database_pool)
+                        .await
+                        .unwrap();
+                    } else {
+                        let user_id_str = command.user.id.0.to_string();
+                        let name = if let Some(member) = command.member.clone() {
+                            member.nick.unwrap_or(command.user.name.clone())
+                        } else {
+                            command.user.name.clone()
+                        };
+                        let discordname = command.user.name.clone();
+                        println!("added {}", name);
+                        sqlx::query!(
+                            "INSERT INTO users (ircnick, discordid, discordname, discordnick, verified) VALUES (?1,?2,?3,?4,?5)",
+                            nick,
+                            discordname,
+                            name,
+                            user_id_str,
+                            false
+                        ).execute(&self.database_pool).await.unwrap();
+                    }
 
                     command
                         .create_interaction_response(&ctx.http, |w| {

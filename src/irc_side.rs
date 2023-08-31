@@ -2,7 +2,7 @@ use irc::client::ClientStream;
 use serenity::client::CacheAndHttp;
 use serenity::futures::StreamExt;
 use serenity::http::client::*;
-use serenity::model::prelude::GuildId;
+use serenity::model::prelude::{GuildId, Member};
 use serenity::model::user::User;
 use sqlx::SqlitePool;
 use std::collections::HashMap;
@@ -51,10 +51,10 @@ pub async fn run_irc(
 
             if channel == config.irc_channel {
                 if let Ok(user) = &user_in_db && user.verified == Some(true) {
-                    username = user.discordnick.clone().unwrap();
+                    username = user.discordname.clone().unwrap();
                 } else {
                     if let Some(guild_member) = guild_member.clone() {
-                        username = guild_member.name;
+                        username = guild_member.nick.unwrap_or(guild_member.user.name);
                     } else {
                         username = nick.clone().into();
                     }
@@ -67,8 +67,14 @@ pub async fn run_irc(
                 if let Ok(user) = user_in_db && user.avatar.is_some() {
                     webhook.edit_avatar(&http, user.avatar.unwrap().as_str()).await.unwrap();
                 } else if let Some(guild_member) = guild_member {
+                    let avatar = if let Some(avatar) = guild_member.avatar_url() {
+                        avatar
+                    } else {
+                        guild_member.user.avatar_url().unwrap_or(guild_member.user.default_avatar_url())        
+                    };
+
                     webhook
-                        .edit_avatar(&http, guild_member.avatar_url().unwrap().as_str())
+                        .edit_avatar(&http, avatar.as_str())
                         .await
                         .unwrap();
                 } else {
@@ -84,7 +90,25 @@ pub async fn run_irc(
                 let command_parts = parts.len();
 
                 if command_parts >= 2 {
-                    if parts[0] == "avatar" {
+                    if parts[0] == "connect" {
+                        if command_parts == 2 {
+                            if let Ok(user) = user_in_db {
+                                if user.discordnick == Some(parts[1].to_string()) {
+                                    let nick_c = nick.clone();
+                                    sqlx::query!(
+                                        "UPDATE users SET verified = ?1 WHERE ircnick = ?2",
+                                        true,
+                                        nick_c
+                                    )
+                                    .execute(&database_pool)
+                                    .await
+                                    .unwrap();
+                                    continue;
+                                }
+                                continue;
+                            }
+                        }
+                    } else if parts[0] == "avatar" {
                         if command_parts == 3 && parts[1] == "gravatar" {
                             let fixed = parts[2].trim().to_lowercase();
                             let hash = md5::compute(fixed.as_bytes());
@@ -169,31 +193,11 @@ pub async fn run_irc(
     }
 }
 
-#[derive(clap::Parser)]
-#[command(author, version, about, long_about=None)]
-pub struct IrcBotCommand {
-    #[command(subcommand)]
-    command: IrcBotSubCommands,
-}
-
-#[derive(clap::Subcommand, Clone)]
-pub enum IrcBotSubCommands {
-    #[command(flatten)]
-    Avatar(AvatarCommand),
-}
-
-#[derive(clap::Subcommand, Clone)]
-pub enum AvatarCommand {
-    Reset,
-    Gravatar { email: String },
-    Url { url: String },
-}
-
-async fn find_member_for_nick(http: &Http, guild: GuildId, nick: String) -> Option<User> {
+async fn find_member_for_nick(http: &Http, guild: GuildId, nick: String) -> Option<Member> {
     if let Ok(members) = guild.search_members(http, nick.as_str(), None).await && members.len() > 0 {
         let c = members.first().unwrap();
         if c.user.name.eq_ignore_ascii_case(nick.as_str()) {
-            Some(c.user.clone())
+            Some(c.clone())
         } else {
             None
         }
