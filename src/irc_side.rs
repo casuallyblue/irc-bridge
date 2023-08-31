@@ -3,9 +3,7 @@ use serenity::client::CacheAndHttp;
 use serenity::futures::StreamExt;
 use serenity::http::client::*;
 use serenity::model::prelude::{GuildId, Member};
-use serenity::model::user::User;
 use sqlx::SqlitePool;
-use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 
 pub async fn run_irc(
@@ -14,17 +12,16 @@ pub async fn run_irc(
     cache: Arc<CacheAndHttp>,
     database_pool: SqlitePool,
     config: crate::Config,
-) {
+) -> Result<(), Box<dyn std::error::Error>> {
     let http = Http::new(&config.discord_token);
 
     let mut webhook = http
         .get_webhook_from_url(&config.discord_webhook)
-        .await
-        .unwrap();
+        .await?;
 
-    let guild = webhook.guild_id.unwrap();
+    let guild = webhook.guild_id.ok_or("No associated discord guild for webhook")?;
 
-    while let Some(message) = stream.next().await.transpose().unwrap() {
+    while let Some(message) = stream.next().await.transpose()? {
         let message = message.clone();
         let Some(nick) = message.source_nickname() else {
             continue;
@@ -42,7 +39,7 @@ pub async fn run_irc(
 
             let guild_member = find_member_for_nick(&http, guild, nick.clone()).await;
 
-            let mut conn = database_pool.acquire().await.unwrap();
+            let mut conn = database_pool.acquire().await?;
 
             let nick_c = nick.clone();
             let user_in_db = sqlx::query!("SELECT * FROM users WHERE ircnick = ?", nick_c)
@@ -51,7 +48,7 @@ pub async fn run_irc(
 
             if channel == config.irc_channel {
                 if let Ok(user) = &user_in_db && user.verified == Some(true) {
-                    username = user.discordname.clone().unwrap();
+                    username = user.discordname.clone().ok_or("Expected a username to exist on record")?;
                 } else {
                     if let Some(guild_member) = guild_member.clone() {
                         username = guild_member.nick.unwrap_or(guild_member.user.name);
@@ -65,7 +62,7 @@ pub async fn run_irc(
                 }
 
                 if let Ok(user) = user_in_db && user.avatar.is_some() {
-                    webhook.edit_avatar(&http, user.avatar.unwrap().as_str()).await.unwrap();
+                    webhook.edit_avatar(&http, user.avatar.ok_or("Expected an avatar since is_some returned true")?.as_str()).await?;
                 } else if let Some(guild_member) = guild_member {
                     let avatar = if let Some(avatar) = guild_member.avatar_url() {
                         avatar
@@ -76,15 +73,15 @@ pub async fn run_irc(
                     webhook
                         .edit_avatar(&http, avatar.as_str())
                         .await
-                        .unwrap();
+                        ?;
                 } else {
-                    webhook.delete_avatar(&http).await.unwrap();
+                    webhook.delete_avatar(&http).await?;
                 }
 
                 webhook
                     .execute(&http, false, |w| w.content(message).username(username))
                     .await
-                    .unwrap();
+                    ?;
             } else if channel == config.irc_nick {
                 let parts: Vec<&str> = message.split_whitespace().collect();
                 let command_parts = parts.len();
@@ -102,7 +99,7 @@ pub async fn run_irc(
                                     )
                                     .execute(&database_pool)
                                     .await
-                                    .unwrap();
+                                    ?;
                                     continue;
                                 }
                                 continue;
@@ -123,7 +120,7 @@ pub async fn run_irc(
                                 )
                                 .execute(&database_pool)
                                 .await
-                                .unwrap();
+                                ?;
                             } else {
                                 sqlx::query!(
                                     "INSERT INTO users ( ircnick, avatar) VALUES ( ?1,?2 )",
@@ -132,7 +129,7 @@ pub async fn run_irc(
                                 )
                                 .execute(&database_pool)
                                 .await
-                                .unwrap();
+                                ?;
                             }
                             continue;
                         } else if command_parts == 2 {
@@ -144,7 +141,7 @@ pub async fn run_irc(
                                         nick_c
                                     ).execute(&database_pool)
                                     .await
-                                    .unwrap();
+                                    ?;
                                 }
                                 continue;
                             } else {
@@ -156,7 +153,7 @@ pub async fn run_irc(
                                     )
                                     .execute(&database_pool)
                                     .await
-                                    .unwrap();
+                                    ?;
                                 } else {
                                     sqlx::query!(
                                         "INSERT INTO users ( ircnick, avatar) VALUES ( ?1,?2 )",
@@ -165,7 +162,7 @@ pub async fn run_irc(
                                     )
                                     .execute(&database_pool)
                                     .await
-                                    .unwrap();
+                                    ?;
                                 }
                                 continue;
                             }
@@ -178,24 +175,30 @@ pub async fn run_irc(
                         irc.send(irc::client::prelude::Command::PRIVMSG(
                             nick.clone(),
                             msg.into(),
-                        ))
-                        .unwrap();
+                        ))?
+                        ;
                     }
+
+                    let result: Result<(), Box<dyn std::error::Error>> = Ok(());
+                    
+                    result
                 };
 
-                pmsg_user("Error, unknown command");
-                pmsg_user("Valid commands are: ");
-                pmsg_user("> avatar gravatar {email}");
-                pmsg_user("> avatar reset");
-                pmsg_user("> avatar {url}");
+                pmsg_user("Error, unknown command")?;
+                pmsg_user("Valid commands are: ")?;
+                pmsg_user("> avatar gravatar {email}")?;
+                pmsg_user("> avatar reset")?;
+                pmsg_user("> avatar {url}")?;
             }
         }
     }
+
+    Ok(())
 }
 
 async fn find_member_for_nick(http: &Http, guild: GuildId, nick: String) -> Option<Member> {
     if let Ok(members) = guild.search_members(http, nick.as_str(), None).await && members.len() > 0 {
-        let c = members.first().unwrap();
+        let c = members.first()?;
         if c.user.name.eq_ignore_ascii_case(nick.as_str()) {
             Some(c.clone())
         } else {

@@ -1,4 +1,4 @@
-#![feature(let_chains)]
+#![feature(let_chains, unboxed_closures)]
 use clap::Parser;
 use serenity::{
     framework::StandardFramework,
@@ -50,7 +50,7 @@ pub struct Config {
 }
 
 #[tokio::main]
-async fn main() {
+async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let config = Config::parse();
 
     println!("LOG: READ CONFIG");
@@ -69,9 +69,9 @@ async fn main() {
     let mut client = irc::client::Client::from_config(irc_config)
         .await
         .expect("Cannot connect to irc");
-    client.identify().unwrap();
+    client.identify()?;
 
-    let pool = SqlitePool::connect(&config.sqlite_path).await.unwrap();
+    let pool = SqlitePool::connect(&config.sqlite_path).await?;
 
     println!("LOG: Connected to irc");
 
@@ -82,9 +82,7 @@ async fn main() {
 
     let http = Http::new_with_application_id(&config.discord_token, config.application_id);
 
-    let webhook = Webhook::from_url(&http, &config.discord_webhook)
-        .await
-        .unwrap();
+    let webhook = Webhook::from_url(&http, &config.discord_webhook).await?;
 
     let handler = discord::Handler {
         config: config.clone(),
@@ -110,18 +108,20 @@ async fn main() {
 
     let httpcache = discord_client.cache_and_http.clone();
 
-    register_discord_slash_commands(config.clone()).await;
+    register_discord_slash_commands(config.clone()).await?;
 
     tokio::select!(
         _ = discord::run_discord(discord_client) => {}
         _ = irc_side::run_irc(stream, clientref.clone(), httpcache, pool.clone(), config.clone()) => {}
     );
+
+    Ok(())
 }
 
-async fn register_discord_slash_commands(config: Config) {
+async fn register_discord_slash_commands(config: Config) -> Result<(), Box<dyn std::error::Error>> {
     let http = Http::new_with_application_id(&config.discord_token, config.application_id);
 
-    let guild = http.get_guild(541017705356984330).await.unwrap();
+    let guild = http.get_guild(541017705356984330).await?;
 
     guild
         .create_application_command(&http, |command| {
@@ -136,6 +136,7 @@ async fn register_discord_slash_commands(config: Config) {
                         .required(true)
                 })
         })
-        .await
-        .unwrap();
+        .await?;
+
+    Ok(())
 }
