@@ -1,11 +1,6 @@
 #![feature(let_chains)]
 use clap::Parser;
-use serenity::{
-    framework::StandardFramework,
-    http::Http,
-    model::{prelude::application_command::ApplicationCommand, webhook::Webhook},
-    prelude::*,
-};
+use serenity::{framework::StandardFramework, http::Http, model::webhook::Webhook, prelude::*};
 use sqlx::SqlitePool;
 use std::sync::{Arc, Mutex};
 

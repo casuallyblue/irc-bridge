@@ -1,5 +1,3 @@
-use futures::Future;
-use regex::Replacer;
 use regex::{Captures, Regex};
 use serenity::async_trait;
 use serenity::http::Http;
@@ -14,6 +12,7 @@ use sqlx::SqlitePool;
 use std::sync::Arc;
 use std::sync::Mutex;
 use tokio::runtime::Handle;
+use tokio::runtime::Runtime;
 
 use crate::Config;
 
@@ -106,6 +105,7 @@ async fn get_nick_from_user(user: &User, id: GuildId, ctx: &Context) -> String {
         None => user.name.clone(),
     }
 }
+
 async fn make_irc_message(config: &Config, message: Message, ctx: &Context) -> String {
     let nick = get_nick_from_user(
         &message.author,
@@ -115,23 +115,21 @@ async fn make_irc_message(config: &Config, message: Message, ctx: &Context) -> S
     .await;
 
     let re = Regex::new(r"@(\d+)").unwrap();
-    let result = re.replace_all(message.content.as_str(), |captures: &Captures| {
-        let handle = Handle::current();
-        let guard = handle.enter();
-
+    /*let result = re.replace_all(message.content.as_str(), |captures: &Captures| {
         let user_id = str::parse::<u64>(&captures[1]).unwrap();
 
         let http =
             Http::new_with_application_id(config.discord_token.as_str(), config.application_id);
 
+        println!("getting name for user id {}", user_id);
         let name =
             futures::executor::block_on(async { http.get_user(user_id).await.unwrap().name });
+        println!("name is {}", name);
 
-        drop(guard);
         name
-    });
+    });*/
 
-    format!("<{}> {}", nick, result)
+    format!("<{}> {}", nick, message.content)
 }
 
 pub async fn run_discord(mut discordclient: Client) {

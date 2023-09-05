@@ -3,9 +3,7 @@ use serenity::client::CacheAndHttp;
 use serenity::futures::StreamExt;
 use serenity::http::client::*;
 use serenity::model::prelude::{GuildId, Member};
-use serenity::model::user::User;
 use sqlx::SqlitePool;
-use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 
 pub async fn run_irc(
