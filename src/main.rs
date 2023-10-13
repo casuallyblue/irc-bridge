@@ -1,4 +1,4 @@
-#![feature(let_chains, unboxed_closures)]
+#![feature(let_chains, unboxed_closures, async_closure)]
 use clap::Parser;
 use serenity::{framework::StandardFramework, http::Http, model::webhook::Webhook, prelude::*};
 use sqlx::SqlitePool;

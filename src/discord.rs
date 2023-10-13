@@ -13,6 +13,9 @@ use std::sync::Arc;
 use std::sync::Mutex;
 use tokio::runtime::Handle;
 use tokio::runtime::Runtime;
+use tokio::sync::mpsc::channel;
+use tokio::sync::mpsc::Receiver;
+use tokio::sync::mpsc::Sender;
 
 use crate::Config;
 
@@ -106,6 +109,28 @@ async fn get_nick_from_user(user: &User, id: GuildId, ctx: &Context) -> String {
     }
 }
 
+#[derive(Debug)]
+enum FindUsernameCommand {
+    Translate(u64),
+    End,
+}
+
+async fn find_discord_usernames(
+    config: Config,
+    mut reciever: Receiver<FindUsernameCommand>,
+    sender: Sender<String>,
+) {
+    let http = Http::new_with_application_id(config.discord_token.as_str(), config.application_id);
+    while let Some(command) = reciever.recv().await {
+        match command {
+            FindUsernameCommand::Translate(id) => {
+                sender.send(http.get_user(id).await.unwrap().name).await;
+            }
+            FindUsernameCommand::End => break,
+        }
+    }
+}
+
 async fn make_irc_message(config: &Config, message: Message, ctx: &Context) -> String {
     let nick = get_nick_from_user(
         &message.author,
@@ -114,22 +139,46 @@ async fn make_irc_message(config: &Config, message: Message, ctx: &Context) -> S
     )
     .await;
 
-    let re = Regex::new(r"@(\d+)").unwrap();
-    /*let result = re.replace_all(message.content.as_str(), |captures: &Captures| {
-        let user_id = str::parse::<u64>(&captures[1]).unwrap();
+    let (task_sender, mut receiver) = channel(10);
+    let (sender, task_receiver) = channel(10);
 
-        let http =
-            Http::new_with_application_id(config.discord_token.as_str(), config.application_id);
+    let finder = tokio::spawn(find_discord_usernames(
+        config.clone(),
+        task_receiver,
+        task_sender,
+    ));
 
-        println!("getting name for user id {}", user_id);
-        let name =
-            futures::executor::block_on(async { http.get_user(user_id).await.unwrap().name });
-        println!("name is {}", name);
+    let re = Regex::new(r"<@(\d+)>").unwrap();
+    let replace = tokio::task::spawn_blocking(move || {
+        let content = message.content.clone();
+        let result = re.replace_all(content.as_str(), |captures: &Captures| {
+            let user_id = str::parse::<u64>(&captures[1]).unwrap();
 
-        name
-    });*/
+            sender
+                .blocking_send(FindUsernameCommand::Translate(user_id))
+                .unwrap();
 
-    format!("<{}> {}", nick, message.content)
+            let username = format!(
+                "{}:",
+                match receiver.blocking_recv() {
+                    Some(name) => name,
+                    _ => user_id.to_string(),
+                }
+            );
+
+            username
+        });
+
+        sender.blocking_send(FindUsernameCommand::End).unwrap();
+
+        return result.to_string();
+    })
+    .await;
+
+    let result = replace.unwrap();
+    finder.await.unwrap();
+
+    format!("<{}> {}", nick, result)
 }
 
 pub async fn run_discord(mut discordclient: Client) {
