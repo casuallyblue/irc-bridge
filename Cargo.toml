@@ -9,7 +9,9 @@ edition = "2021"
 clap = { version = "4.0.11", features = ["derive", "env"] }
 futures = "0.3.28"
 irc = { version = "0.15.0", default-features = false, features = ["ctcp", "serde", "serde_derive", "tls-rust", "tokio-rustls", "toml", "toml_config"] }
+linkify = "0.10.0"
 md5 = "0.7.0"
+opengraph = "0.2.4"
 regex = { version = "1.9.4", features = ["pattern"] }
 serenity = { version = "0.11.5", features = ["model"] }
 sqlx = { version = "0.7.1", features = ["sqlite", "runtime-tokio-native-tls"] }

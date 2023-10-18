@@ -1,3 +1,5 @@
+use linkify::LinkFinder;
+use opengraph::Opts;
 use regex::{Captures, Regex};
 use serenity::async_trait;
 use serenity::http::Http;
@@ -38,9 +40,22 @@ impl EventHandler for Handler {
             if str::parse::<u64>(self.config.discord_channel.as_str()) == Ok(message.channel_id.0) {
                 let message = make_irc_message(&self.config, message, &ctx).await;
 
+                let linkfinder = LinkFinder::new();
+
                 self.irc_sender
-                    .send_privmsg(self.config.irc_channel.clone(), message)
+                    .send_privmsg(self.config.irc_channel.clone(), message.clone())
                     .expect("Cannot send message to irc");
+
+                for link in linkfinder.links(message.as_str()) {
+                    if let Ok(object) = opengraph::scrape(link.as_str(), Opts::default()) {
+                        self.irc_sender
+                            .send_privmsg(
+                                self.config.irc_channel.clone(),
+                                format!("[{}]", object.title),
+                            )
+                            .expect("Cannot send link info to irc");
+                    }
+                }
             }
         }
     }

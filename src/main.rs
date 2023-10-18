@@ -37,10 +37,10 @@ pub struct Config {
     #[clap(env = "BRIDGE_SQLITE_PATH")]
     sqlite_path: String,
 
-    #[clap(env = "IRC_IGNORED_USERS")]
+    #[clap(env = "IRC_IGNORED_USERS", long = "irc_ignored")]
     ignored_irc_users: Vec<String>,
 
-    #[clap(env = "DISCORD_IGNORED_USERS")]
+    #[clap(env = "DISCORD_IGNORED_USERS", long = "discord_ignored")]
     ignored_discord_users: Vec<u64>,
 }
 
@@ -61,9 +61,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         ..Default::default()
     };
 
+    println!("LOG: Connecting to irc");
+
     let mut client = irc::client::Client::from_config(irc_config)
         .await
         .expect("Cannot connect to irc");
+    println!("LOG: Identifying to irc server");
     client.identify()?;
 
     let pool = SqlitePool::connect(&config.sqlite_path).await?;

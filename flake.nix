@@ -37,6 +37,8 @@
 
 
       DATABASE_URL="sqlite://${sqlx-db}/bridge.sqlite3";
+      BRIDGE_SQLITE_PATH="sqlite://${sqlx-db}/bridge.sqlite3";
+
 	nativeBuildInputs = with pkgs; [
             rust-analyzer
             pkg-config

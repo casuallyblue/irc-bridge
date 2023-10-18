@@ -1,4 +1,6 @@
 use irc::client::ClientStream;
+use irc::proto::Command;
+use linkify::LinkFinder;
 use serenity::client::CacheAndHttp;
 use serenity::futures::StreamExt;
 use serenity::http::client::*;
@@ -20,6 +22,8 @@ pub async fn run_irc(
         .await?;
 
     let guild = webhook.guild_id.ok_or("No associated discord guild for webhook")?;
+
+    let linkfinder = LinkFinder::new();
 
     while let Some(message) = stream.next().await.transpose()? {
         let message = message.clone();
@@ -46,7 +50,7 @@ pub async fn run_irc(
                 .fetch_one(&mut *conn)
                 .await;
 
-            if channel == config.irc_channel {
+            if channel == config.irc_channel.clone() {
                 if let Ok(user) = &user_in_db && user.verified == Some(true) {
                     username = user.discordname.clone().ok_or("Expected a username to exist on record")?;
                 } else {
@@ -79,9 +83,21 @@ pub async fn run_irc(
                 }
 
                 webhook
-                    .execute(&http, false, |w| w.content(message).username(username))
+                    .execute(&http, false, |w| w.content(message.clone()).username(username))
                     .await
                     ?;
+                
+                for link in linkfinder.links(message.as_str()) {
+                    let og = opengraph::scrape(link.as_str(), opengraph::Opts::default());
+
+                    if let Ok(object) = og {
+
+                    
+                    if let Ok(irc) = irc.lock() {
+                        irc.send(Command::PRIVMSG(config.irc_channel.clone(), format!("[{}]",object.title)))?;
+                    }
+                    }
+                }
             } else if channel == config.irc_nick {
                 let parts: Vec<&str> = message.split_whitespace().collect();
                 let command_parts = parts.len();
