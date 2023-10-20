@@ -13,8 +13,6 @@ use serenity::prelude::*;
 use sqlx::SqlitePool;
 use std::sync::Arc;
 use std::sync::Mutex;
-use tokio::runtime::Handle;
-use tokio::runtime::Runtime;
 use tokio::sync::mpsc::channel;
 use tokio::sync::mpsc::Receiver;
 use tokio::sync::mpsc::Sender;
@@ -67,8 +65,7 @@ impl EventHandler for Handler {
                     let nick = command.data.options.first().unwrap().clone().value.unwrap();
                     let nick = nick.as_str().unwrap();
 
-                    let nick_c = nick.clone();
-                    if let Ok(_) = sqlx::query!("SELECT * FROM users WHERE ircnick=?1", nick_c)
+                    if let Ok(_) = sqlx::query!("SELECT * FROM users WHERE ircnick=?1", nick)
                         .fetch_one(&self.database_pool)
                         .await
                     {
@@ -77,7 +74,7 @@ impl EventHandler for Handler {
                             "UPDATE users SET discordid = ?1, discordnick = ?2 WHERE ircnick = ?3",
                             user_id_str,
                             command.user.name,
-                            nick_c
+                            nick
                         )
                         .execute(&self.database_pool)
                         .await
@@ -139,7 +136,10 @@ async fn find_discord_usernames(
     while let Some(command) = reciever.recv().await {
         match command {
             FindUsernameCommand::Translate(id) => {
-                sender.send(http.get_user(id).await.unwrap().name).await;
+                sender
+                    .send(http.get_user(id).await.unwrap().name)
+                    .await
+                    .expect("Could not send data to thread");
             }
             FindUsernameCommand::End => break,
         }

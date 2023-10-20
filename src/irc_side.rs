@@ -11,7 +11,7 @@ use std::sync::{Arc, Mutex};
 pub async fn run_irc(
     mut stream: ClientStream,
     irc: Arc<Mutex<irc::client::Client>>,
-    cache: Arc<CacheAndHttp>,
+    _cache: Arc<CacheAndHttp>,
     database_pool: SqlitePool,
     config: crate::Config,
 ) -> Result<(), Box<dyn std::error::Error>> {
