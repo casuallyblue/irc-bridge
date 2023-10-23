@@ -3,6 +3,10 @@
 .direnv
 result
 db.sqlite
+<<<<<<< HEAD
 bridge.sqlite3 
 bridge.sqlite3-shm 
 bridge.sqlite3-wal
+=======
+bridge.sqlite3
+>>>>>>> refs/remotes/origin/main

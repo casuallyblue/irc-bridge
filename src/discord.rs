@@ -70,8 +70,7 @@ impl EventHandler for Handler {
                     let nick = command.data.options.first().unwrap().clone().value.unwrap();
                     let nick = nick.as_str().unwrap();
 
-                    let nick_c = nick.clone();
-                    if let Ok(_) = sqlx::query!("SELECT * FROM users WHERE ircnick=?1", nick_c)
+                    if let Ok(_) = sqlx::query!("SELECT * FROM users WHERE ircnick=?1", nick)
                         .fetch_one(&self.database_pool)
                         .await
                     {
@@ -80,7 +79,7 @@ impl EventHandler for Handler {
                             "UPDATE users SET discordid = ?1, discordnick = ?2 WHERE ircnick = ?3",
                             user_id_str,
                             command.user.name,
-                            nick_c
+                            nick
                         )
                         .execute(&self.database_pool)
                         .await
