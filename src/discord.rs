@@ -1,5 +1,3 @@
-use linkify::LinkFinder;
-use opengraph::Opts;
 use regex::{Captures, Regex};
 use serenity::async_trait;
 use serenity::http::Http;
@@ -13,12 +11,14 @@ use serenity::prelude::*;
 use sqlx::SqlitePool;
 use std::sync::Arc;
 use std::sync::Mutex;
-use tokio::runtime::Handle;
-use tokio::runtime::Runtime;
 use tokio::sync::mpsc::channel;
 use tokio::sync::mpsc::Receiver;
 use tokio::sync::mpsc::Sender;
 
+use crate::IrcRequest;
+use crate::Result;
+
+use crate::BridgeSenders;
 use crate::Config;
 
 pub struct Handler {
@@ -28,33 +28,36 @@ pub struct Handler {
     pub ignored_users: Vec<UserId>,
     pub webhook_id: WebhookId,
     pub database_pool: SqlitePool,
+    pub senders: BridgeSenders,
+}
+
+pub async fn discord_receiver(mut discord_client: Client) -> Result<()> {
+    discord_client.start().await?;
+    Ok(())
+}
+
+impl Handler {
+    fn should_ignore_message(&self, ctx: &Context, message: &Message) -> bool {
+        message.is_own(&ctx.cache)
+            || self.ignored_users.contains(&message.author.id)
+            || (message.webhook_id == Some(self.webhook_id))
+    }
 }
 
 #[async_trait]
 impl EventHandler for Handler {
     async fn message(&self, ctx: Context, message: Message) {
-        if !message.is_own(&ctx.cache)
-            && !self.ignored_users.contains(&message.author.id)
-            && !(message.webhook_id == Some(self.webhook_id))
-        {
-            if str::parse::<u64>(self.config.discord_channel.as_str()) == Ok(message.channel_id.0) {
+        if !self.should_ignore_message(&ctx, &message) {
+            if self.config.discord_channel == message.channel_id.0 {
                 let message = make_irc_message(&self.config, message, &ctx).await;
 
-                let linkfinder = LinkFinder::new();
+                let request = IrcRequest::SendMessage {
+                    to: self.config.irc_channel.clone(),
+                    message,
+                };
 
-                self.irc_sender
-                    .send_privmsg(self.config.irc_channel.clone(), message.clone())
-                    .expect("Cannot send message to irc");
-
-                for link in linkfinder.links(message.as_str()) {
-                    if let Ok(object) = opengraph::scrape(link.as_str(), Opts::default()) {
-                        self.irc_sender
-                            .send_privmsg(
-                                self.config.irc_channel.clone(),
-                                format!("[{}]", object.title),
-                            )
-                            .expect("Cannot send link info to irc");
-                    }
+                if let Err(e) = self.senders.irc.send(request).await {
+                    println!("Could not send request to irc {e}")
                 }
             }
         }
@@ -98,7 +101,7 @@ impl EventHandler for Handler {
                             name,
                             user_id_str,
                             false
-                        ).execute(&self.database_pool).await.unwrap();
+                        ).execute(&self.database_pool).await.expect("Could not insert record into table");
                     }
 
                     command
@@ -108,7 +111,7 @@ impl EventHandler for Handler {
                             })
                         })
                         .await
-                        .unwrap()
+                        .expect("Could not respond to discord interaction");
                 }
                 _ => {}
             },
@@ -139,7 +142,10 @@ async fn find_discord_usernames(
     while let Some(command) = reciever.recv().await {
         match command {
             FindUsernameCommand::Translate(id) => {
-                sender.send(http.get_user(id).await.unwrap().name).await;
+                sender
+                    .send(http.get_user(id).await.unwrap().name)
+                    .await
+                    .expect("Could not send user id to calling thread");
             }
             FindUsernameCommand::End => break,
         }
@@ -163,42 +169,33 @@ async fn make_irc_message(config: &Config, message: Message, ctx: &Context) -> S
         task_sender,
     ));
 
-    let re = Regex::new(r"<@(\d+)>").unwrap();
-    let replace = tokio::task::spawn_blocking(move || {
-        let content = message.content.clone();
-        let result = re.replace_all(content.as_str(), |captures: &Captures| {
-            let user_id = str::parse::<u64>(&captures[1]).unwrap();
+    let message_before_replacement = message.clone();
+    let actual_message = tokio::task::spawn_blocking(move || {
+        let result = Regex::new(r"<@(\d+)>")
+            .expect("Could not compile regex")
+            .replace_all(message.content.as_ref(), |captures: &Captures| {
+                let located_user_string = match str::parse::<u64>(&captures[1]).ok() {
+                    Some(user_id) => {
+                        sender
+                            .blocking_send(FindUsernameCommand::Translate(user_id))
+                            .unwrap();
 
-            sender
-                .blocking_send(FindUsernameCommand::Translate(user_id))
-                .unwrap();
+                        receiver.blocking_recv().unwrap_or(user_id.to_string())
+                    }
+                    None => captures[1].to_string(),
+                };
 
-            let username = format!(
-                "{}:",
-                match receiver.blocking_recv() {
-                    Some(name) => name,
-                    _ => user_id.to_string(),
-                }
-            );
-
-            username
-        });
+                format!("{}:", located_user_string)
+            });
 
         sender.blocking_send(FindUsernameCommand::End).unwrap();
 
         return result.to_string();
     })
-    .await;
+    .await
+    .unwrap_or(message_before_replacement.content);
 
-    let result = replace.unwrap();
     finder.await.unwrap();
 
-    format!("<{}> {}", nick, result)
-}
-
-pub async fn run_discord(mut discordclient: Client) {
-    // start listening for events by starting a single shard
-    if let Err(why) = discordclient.start().await {
-        println!("An error occurred while running the client: {:?}", why);
-    }
+    format!("<{}> {}", nick, actual_message)
 }

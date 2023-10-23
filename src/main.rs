@@ -1,8 +1,13 @@
 #![feature(let_chains, unboxed_closures, async_closure)]
 use clap::Parser;
+use irc::client::Sender;
 use serenity::{framework::StandardFramework, http::Http, model::webhook::Webhook, prelude::*};
 use sqlx::SqlitePool;
 use std::sync::{Arc, Mutex};
+use tokio::{
+    select,
+    sync::mpsc::{channel, Receiver},
+};
 
 mod discord;
 mod irc_side;
@@ -32,7 +37,7 @@ pub struct Config {
     discord_webhook: String,
 
     #[clap(env = "BRIDGE_DISCORD_CHANNEL")]
-    discord_channel: String,
+    discord_channel: u64,
 
     #[clap(env = "BRIDGE_SQLITE_PATH")]
     sqlite_path: String,
@@ -45,7 +50,7 @@ pub struct Config {
 }
 
 #[tokio::main]
-async fn main() -> Result<(), Box<dyn std::error::Error>> {
+async fn main() -> Result<()> {
     let config = Config::parse();
 
     println!("LOG: READ CONFIG");
@@ -82,13 +87,21 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let webhook = Webhook::from_url(&http, &config.discord_webhook).await?;
 
+    let (irc_command_sender, irc_command_receiver) = channel(20);
+    let (discord_command_sender, discord_command_receiver) = channel(20);
+    let senders = BridgeSenders {
+        irc: irc_command_sender.clone(),
+        discord: discord_command_sender.clone(),
+    };
+
     let handler = discord::Handler {
         config: config.clone(),
-        irc_sender: sender,
+        irc_sender: sender.clone(),
         client_ref: clientref.clone(),
         ignored_users: vec![1021460721239867535.into()],
         webhook_id: webhook.id,
         database_pool: pool.clone(),
+        senders: senders.clone(),
     };
 
     println!("LOG: Created discord handler");
@@ -104,19 +117,19 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .await
         .expect("Error creating client");
 
-    let httpcache = discord_client.cache_and_http.clone();
-
     register_discord_slash_commands(config.clone()).await?;
 
-    tokio::select!(
-        _ = discord::run_discord(discord_client) => {}
-        _ = irc_side::run_irc(stream, clientref.clone(), httpcache, pool.clone(), config.clone()) => {}
-    );
+    let _ = select! {
+        Ok(()) = discord_sender(config.clone(), discord_command_receiver) => {},
+        Ok(()) = discord::discord_receiver(discord_client) => {},
+        Ok(()) = irc_side::irc_receiver(stream, pool.clone(), config.clone(), senders.clone()) => {}
+        Ok(()) = irc_sender(sender.clone(), irc_command_receiver) => {},
+    };
 
     Ok(())
 }
 
-async fn register_discord_slash_commands(config: Config) -> Result<(), Box<dyn std::error::Error>> {
+async fn register_discord_slash_commands(config: Config) -> Result<()> {
     let http = Http::new_with_application_id(&config.discord_token, config.application_id);
 
     let guild = http.get_guild(541017705356984330).await?;
@@ -136,5 +149,56 @@ async fn register_discord_slash_commands(config: Config) -> Result<(), Box<dyn s
         })
         .await?;
 
+    Ok(())
+}
+
+pub type Result<T> = std::result::Result<T, Box<dyn std::error::Error>>;
+
+#[derive(Clone, Debug)]
+pub struct BridgeSenders {
+    irc: tokio::sync::mpsc::Sender<IrcRequest>,
+    discord: tokio::sync::mpsc::Sender<DiscordRequest>,
+}
+
+#[derive(Debug)]
+pub enum IrcRequest {
+    SendMessage { to: String, message: String },
+}
+
+#[derive(Debug)]
+pub enum DiscordRequest {
+    SendMessage { alias: String, message: String },
+    SetAvatar { avatar_url: Option<String> },
+}
+
+async fn discord_sender(config: Config, mut commands: Receiver<DiscordRequest>) -> Result<()> {
+    let http = Http::new(&config.discord_token);
+
+    let mut webhook = http.get_webhook_from_url(&config.discord_webhook).await?;
+
+    while let Some(command) = commands.recv().await {
+        match command {
+            DiscordRequest::SendMessage { alias, message } => {
+                webhook
+                    .execute(&http, false, |webhook| {
+                        webhook.content(message).username(alias)
+                    })
+                    .await?;
+            }
+            DiscordRequest::SetAvatar { avatar_url } => match avatar_url {
+                Some(avatar) => webhook.edit_avatar(&http, avatar.as_str()).await?,
+                None => webhook.delete_avatar(&http).await?,
+            },
+        }
+    }
+    Ok(())
+}
+
+async fn irc_sender(sender: Sender, mut commands: Receiver<IrcRequest>) -> Result<()> {
+    while let Some(command) = commands.recv().await {
+        match command {
+            IrcRequest::SendMessage { to, message } => sender.send_privmsg(to, message)?,
+        }
+    }
     Ok(())
 }
