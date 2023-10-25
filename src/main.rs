@@ -1,6 +1,10 @@
 #![feature(let_chains, unboxed_closures, async_closure)]
 use clap::Parser;
-use irc::client::Sender;
+use irc::{
+    client::Sender,
+    proto::{Command, Message, Prefix},
+};
+use irc_side::IrcResponseCallback;
 use serenity::{framework::StandardFramework, http::Http, model::webhook::Webhook, prelude::*};
 use sqlx::SqlitePool;
 use std::sync::{Arc, Mutex};
@@ -89,9 +93,11 @@ async fn main() -> Result<()> {
 
     let (irc_command_sender, irc_command_receiver) = channel(20);
     let (discord_command_sender, discord_command_receiver) = channel(20);
+    let (irc_response_callback_sender, irc_response_callback_receiver) = channel(20);
     let senders = BridgeSenders {
         irc: irc_command_sender.clone(),
         discord: discord_command_sender.clone(),
+        irc_callback: irc_response_callback_sender.clone(),
     };
 
     let handler = discord::Handler {
@@ -122,8 +128,8 @@ async fn main() -> Result<()> {
     let _ = select! {
         Ok(()) = discord_sender(config.clone(), discord_command_receiver) => {},
         Ok(()) = discord::discord_receiver(discord_client) => {},
-        Ok(()) = irc_side::irc_receiver(stream, pool.clone(), config.clone(), senders.clone()) => {}
-        Ok(()) = irc_sender(sender.clone(), irc_command_receiver) => {},
+        Ok(()) = irc_side::irc_receiver(stream, pool.clone(), config.clone(), senders.clone(), irc_response_callback_receiver) => {}
+        Ok(()) = irc_sender(config.clone(), sender.clone(), irc_command_receiver, senders.clone()) => {},
     };
 
     Ok(())
@@ -149,6 +155,14 @@ async fn register_discord_slash_commands(config: Config) -> Result<()> {
         })
         .await?;
 
+    guild
+        .create_application_command(&http, |command| {
+            command
+                .name("users")
+                .description("Show the currently logged in users in the irc channel")
+        })
+        .await?;
+
     Ok(())
 }
 
@@ -158,11 +172,13 @@ pub type Result<T> = std::result::Result<T, Box<dyn std::error::Error>>;
 pub struct BridgeSenders {
     irc: tokio::sync::mpsc::Sender<IrcRequest>,
     discord: tokio::sync::mpsc::Sender<DiscordRequest>,
+    irc_callback: tokio::sync::mpsc::Sender<IrcResponseCallback>,
 }
 
 #[derive(Debug)]
 pub enum IrcRequest {
     SendMessage { to: String, message: String },
+    Names { callback: IrcResponseCallback },
 }
 
 #[derive(Debug)]
@@ -194,10 +210,28 @@ async fn discord_sender(config: Config, mut commands: Receiver<DiscordRequest>) 
     Ok(())
 }
 
-async fn irc_sender(sender: Sender, mut commands: Receiver<IrcRequest>) -> Result<()> {
+async fn irc_sender(
+    config: Config,
+    sender: Sender,
+    mut commands: Receiver<IrcRequest>,
+    senders: BridgeSenders,
+) -> Result<()> {
     while let Some(command) = commands.recv().await {
         match command {
             IrcRequest::SendMessage { to, message } => sender.send_privmsg(to, message)?,
+            IrcRequest::Names { callback } => {
+                println!("Got request to get names from irc");
+                senders.irc_callback.send(callback).await?;
+                println!("Setup callback");
+                let message = Message {
+                    tags: None,
+                    prefix: None,
+                    command: Command::NAMES(Some(config.irc_channel.clone()), None),
+                };
+                println!("sending '{}' to irc", message);
+                sender.send(message)?;
+                println!("sent names command to irc");
+            }
         }
     }
     Ok(())
