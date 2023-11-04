@@ -47,30 +47,13 @@ impl Handler {
     }
 
     async fn handle_names_command(&self, ctx: &Context, command: ApplicationCommandInteraction) {
-        let (sender, mut receiver) = tokio::sync::mpsc::channel(1);
         self.senders
             .irc
             .send(IrcRequest::Names {
-                callback: IrcResponseCallback { sender },
+                interaction: command,
             })
             .await
             .expect("Could not send message to irc handler");
-
-        println!("Sent request for names to irc");
-
-        if let Some(response) = receiver.recv().await {
-            println!("Received response to names message");
-            match response {
-                crate::irc_side::IrcResponse::NamesResponse(names) => {
-                    command
-                        .create_interaction_response(&ctx.http, |w| {
-                            w.interaction_response_data(|w| w.content(names.join("\n")))
-                        })
-                        .await
-                        .expect("Could not create interaction response");
-                }
-            }
-        }
     }
 
     async fn handle_connect_user_command(

@@ -3,6 +3,8 @@ use irc::client::ClientStream;
 use irc::proto::Response;
 use serenity::futures::StreamExt;
 use serenity::http::client::*;
+use serenity::model::prelude::application_command::ApplicationCommandInteraction;
+use serenity::model::prelude::interaction::InteractionResponseType;
 use serenity::model::prelude::{GuildId, Member};
 use sqlx::SqlitePool;
 use tokio::sync::mpsc::Receiver;
@@ -123,7 +125,7 @@ pub enum IrcResponse {
 
 #[derive(Debug)]
 pub struct IrcResponseCallback {
-    pub sender: tokio::sync::mpsc::Sender<IrcResponse>,
+    pub interaction: ApplicationCommandInteraction,
 }
 
 pub async fn irc_receiver(
@@ -147,10 +149,16 @@ pub async fn irc_receiver(
         match message.command {
             irc::proto::Command::Response(Response::RPL_NAMREPLY, data) => {
                 println!("Received names reply with content {:?}", data);
-                if let Some(callback) = response_callbacks.try_recv().ok() {
-                    let _ = callback.sender.send(IrcResponse::NamesResponse(data));
+                if let Some(interaction) = response_callbacks.try_recv().ok() {
+                    interaction
+                        .interaction
+                        .create_interaction_response(&http, |w| {
+                            w.kind(InteractionResponseType::Modal)
+                                .interaction_response_data(|w| w.content(data.join("\n")))
+                        })
+                        .await;
                 } else {
-                    println!("No callback found");
+                    println!("No commands waiting");
                 }
             }
             irc::proto::Command::PRIVMSG(channel, message) => {

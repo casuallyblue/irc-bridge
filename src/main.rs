@@ -5,7 +5,12 @@ use irc::{
     proto::{Command, Message, Prefix},
 };
 use irc_side::IrcResponseCallback;
-use serenity::{framework::StandardFramework, http::Http, model::webhook::Webhook, prelude::*};
+use serenity::{
+    framework::StandardFramework,
+    http::Http,
+    model::{prelude::application_command::ApplicationCommandInteraction, webhook::Webhook},
+    prelude::*,
+};
 use sqlx::SqlitePool;
 use std::sync::{Arc, Mutex};
 use tokio::{
@@ -177,8 +182,13 @@ pub struct BridgeSenders {
 
 #[derive(Debug)]
 pub enum IrcRequest {
-    SendMessage { to: String, message: String },
-    Names { callback: IrcResponseCallback },
+    SendMessage {
+        to: String,
+        message: String,
+    },
+    Names {
+        interaction: ApplicationCommandInteraction,
+    },
 }
 
 #[derive(Debug)]
@@ -219,16 +229,19 @@ async fn irc_sender(
     while let Some(command) = commands.recv().await {
         match command {
             IrcRequest::SendMessage { to, message } => sender.send_privmsg(to, message)?,
-            IrcRequest::Names { callback } => {
+            IrcRequest::Names { interaction } => {
                 println!("Got request to get names from irc");
-                senders.irc_callback.send(callback).await?;
+                senders
+                    .irc_callback
+                    .send(IrcResponseCallback { interaction })
+                    .await?;
                 println!("Setup callback");
                 let message = Message {
                     tags: None,
                     prefix: None,
                     command: Command::NAMES(Some(config.irc_channel.clone()), None),
                 };
-                println!("sending '{}' to irc", message);
+                println!("sending a command '{}' to irc", message);
                 sender.send(message)?;
                 println!("sent names command to irc");
             }
