@@ -209,11 +209,11 @@ async fn make_irc_message(config: &Config, message: Message, ctx: &Context) -> S
     let message_before_replacement = message.clone();
     let actual_message = async_regex_replace_usernames(message, sender, receiver)
         .await
-        .unwrap_or(message_before_replacement.content);
+        .unwrap_or(message_before_replacement.content.clone());
 
     finder.await.unwrap();
 
-    format!("<{}> {}", nick, actual_message)
+    format!("<{}> {}", nick, message_before_replacement.content)
 }
 
 fn async_regex_replace_usernames(
