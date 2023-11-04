@@ -28,7 +28,7 @@
           mkdir $out
           export DATABASE_URL=sqlite:$out/bridge.sqlite3
           sqlx database create
-          echo hi
+          echo hi there
           sqlx migrate run --source ${./migrations}
         '';
       in
