@@ -17,28 +17,31 @@
       let
         craneLib = crane.lib.${system}.overrideToolchain fenix.packages.${system}.complete.toolchain;
 
-	      pkgs = import nixpkgs {
+        pkgs = import nixpkgs {
           inherit system;
         };
 
-        sqlx-db = pkgs.runCommand "sqlx-db-prepare" {
-          nativeBuildInputs = with pkgs; [ sqlx-cli ];
-        } '' 
+        sqlx-db = pkgs.runCommand "sqlx-db-prepare"
+          {
+            nativeBuildInputs = with pkgs; [ sqlx-cli ];
+          } '' 
           mkdir $out
           export DATABASE_URL=sqlite:$out/bridge.sqlite3
           sqlx database create
+          echo hi
           sqlx migrate run --source ${./migrations}
-        ''; 
-      in {
+        '';
+      in
+      {
 
         packages.default = craneLib.buildPackage {
           src = ./.;
 
 
-          DATABASE_URL="sqlite://${sqlx-db}/bridge.sqlite3?immutable=true";
-          BRIDGE_SQLITE_PATH="sqlite://${sqlx-db}/bridge.sqlite3?immutable=true";
+          DATABASE_URL = "sqlite://${sqlx-db}/bridge.sqlite3?immutable=true";
+          BRIDGE_SQLITE_PATH = "sqlite://${sqlx-db}/bridge.sqlite3?immutable=true";
 
-	        nativeBuildInputs = with pkgs; [
+          nativeBuildInputs = with pkgs; [
             rust-analyzer
             pkg-config
             openssl
