@@ -13,6 +13,11 @@
   };
 
   outputs = { self, nixpkgs, crane, fenix, flake-utils, ... }:
+    {
+      nixosModules = {
+        default = import ./irc-bridge.nix self;
+      };
+    } //
     flake-utils.lib.eachDefaultSystem (system:
       let
         craneLib = crane.lib.${system}.overrideToolchain fenix.packages.${system}.complete.toolchain;
@@ -48,9 +53,6 @@
           ] ++ (if system == "aarch64-darwin" then [ libiconv darwin.apple_sdk.frameworks.Security ] else [ ]);
         };
 
-        nixosModules = {
-          default = import ./irc-bridge.nix self;
-        };
       }
     );
 }
